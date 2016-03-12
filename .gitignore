@@ -1,0 +1,21 @@
+# Backup files
+*~
+
+.DS_Store
+
+.ropeproject
+
+# ignore data files
+data
+
+*.egg-info
+*.py[co]
+__pycache__
+dist/
+build/
+node_modules/
+
+# latex generated
+*.log
+*.out
+*.aux

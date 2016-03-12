@@ -1,0 +1,283 @@
+\documentclass[10pt]{article}
+\usepackage{amsmath,amssymb,epsfig,graphics,hyperref,amsthm,mathtools,
+  mdframed,enumitem}
+\DeclarePairedDelimiter\ceil{\lceil}{\rceil}
+\DeclarePairedDelimiter\floor{\lfloor}{\rfloor}
+
+\hypersetup{colorlinks=true}
+
+\setlength{\textwidth}{7in}
+\setlength{\topmargin}{-0.575in}
+\setlength{\textheight}{9.25in}
+\setlength{\oddsidemargin}{-.25in}
+\setlength{\evensidemargin}{-.25in}
+
+\reversemarginpar
+\setlength{\marginparsep}{-15mm}
+
+\newcommand{\rmv}[1]{}
+\newcommand{\bemph}[1]{{\bfseries\itshape#1}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\imply}{\to}
+\newcommand{\bic}{\leftrightarrow}
+
+% Some user defined strings for the homework assignment
+%
+\def\Author{Shuo Yang}
+
+\begin{document}
+
+\noindent
+
+% \CourseCode \hfill \DateHandedOut
+
+\begin{center}
+  Consumer Driven Congestion Control Design for NDN\\
+  \vspace{1em}
+\end{center}
+
+% A horizontal split line
+\hrule\smallskip
+\vspace{1em}
+\underline{\textbf{Design}}\\
+
+In this design, congestion can be detected in three different ways:
+\begin{enumerate}
+\item Re-transmission timer expires.\\
+  \emph{action:} Reset the current window size to 1.
+\item A NACK received with the reason as ``congestion''.\\
+  If the sequence number of the received NACK is
+  greater than the sequence number of the last received NACK $+$ $k *
+  $(the current window size), where $k<1$. the consumer should regard
+  this as a sign of 
+  congestion. The purpose of doing this is to avoid the sharp drop
+  of the congestion window size caused by the situation where a
+  consecutive sequence of NACKs were received because of a burst of
+  packet drops occurred in the network. In such case, we want
+  only one multiplicative decrease like what TCP did.\\
+  \emph{action:} multiplicative decrease, fast re-transmission and
+  fast recovery.
+\item A hole in the packets sequence detected.\\
+  When the consumer sends interest packets out, it records the
+  order of the sent interests. When the data packets come back, the
+  consumer can check whether the data packets are in the same order
+  as the interests. The assumption is that most time data packets
+  should arrive in order. If the consumer expected the $N_{th}$
+  data packet to arrive, but instead the $M$ more data after it have
+  arrived, the consumer regards this as a sign of congestion.\\
+  \emph{action:} multiplicative decrease, fast re-transmission and
+  fast recovery.
+\end{enumerate}
+
+\vspace{1em}
+\underline{\textbf{Important Data Structures and Variables}}\\
+\begin{mdframed}
+  \textbf{sentQueue}: this queue is used to hold the interest packets that are in
+  the current window, i.e., they have not been acknowledged yet. Once
+  the consumer received the data packets, it removes the
+  corresponding entries in the queue.\\\\
+  \textbf{retxQueue}: this queue is used to hold the interest packets that
+  should be re-transmitted due to congestion.\\\\
+  \textbf{retxedList}: this list is used to hold the interest packets
+  that have been re-transmitted and not acknowledged yet.\\\\
+  \textbf{outOfOrderDataList}: this list is used to hold the
+  received data packets that are out of order. As long as the consumer
+  received the data packet with the expected sequence number, this
+  list should be set to empty.\\\\
+  \textbf{cwnd}: congestion window size\\
+  \textbf{ssthresh}: slow start threshold\\
+  \textbf{nextSeqNum}: the sequence number of the next interest packet
+  to be sent out in order. This number should be monotonically
+  increasing.\\
+  \textbf{lastReceivedNack}: the most-recently received NACK packet.\\
+  \textbf{RTO}: value of the current calculated RTO
+\end{mdframed}
+
+\vspace{1em}
+\underline{\textbf{Adjustable Parameters}}\\
+\begin{mdframed}
+  \textbf{initialCwnd}: initial value for cwnd\\
+  \textbf{initialSsthresh}: initial value for ssthresh\\
+  \textbf{MDcoef}: coefficient for multiplicative decrease. In TCP,
+  its value is 0.5\\
+  \textbf{AIstep}: incremental quantity for additive increase. In TCP,
+  its value is 1\\
+  \textbf{maxOutOfOrderData}: the maximum number of consecutively
+  arrived out-of-order data packets the consumer can withstand until
+  triggering a congestion signal\\
+  \textbf{rtoBackoffMultiplier}: the multiplier for RTO back off. In
+  TCP, its value is 2\\
+\end{mdframed}
+
+\vspace{1em}
+\underline{\textbf{Congestion Control Algorithm}}\\
+\begin{mdframed}
+  \underline{\textbf{Init()}}\\
+  \-\hspace{1em} cwnd = initialCwnd\\
+  \-\hspace{1em} ssthresh = initialSsthresh\\
+  \-\hspace{1em} nextSeqNum = 1\\
+  \-\hspace{1em} lastReceivedNack = null\\
+  \-\hspace{1em} sentQueue = []\\
+  \-\hspace{1em} retxQueue = []\\
+  \-\hspace{1em} retxedList = []\\
+  \-\hspace{1em} outOfOrderDataList = []\\
+  \-\hspace{1em} maxOutOfOrderData = 3\\
+  \-\hspace{1em} ScheduleNextInterest()  /$*$ send out the first
+  interest $*$/ \\\\
+  \underline{\textbf{ScheduleNextInterest()}} \\
+  \-\hspace{1em} \textbf{if} !retxQueue.empty()\\
+  \-\hspace{2em} SendInterest(retxQueue.first()) /$*$ send out interests
+  that need re-transmission first $*$/\\
+  \-\hspace{2em} retxedList.add(retxQueue.first())\\
+  \-\hspace{2em} retxQueue.removeFirst()\\
+  \-\hspace{1em} \textbf{else}\\
+  \-\hspace{2em} SendInterest(nextSeqNum)\\
+  \-\hspace{2em} nextSeqNum = nextSeqNum + 1\\\\
+  \underline{\textbf{SendInterest(seqNum)}} \\
+  \-\hspace{1em} sentQueue.add(seqNum)\\
+  \-\hspace{1em} timer[seqNum] = RTO\\
+  \-\hspace{1em} transmitInterest(seqNum)\\\\
+  \underline{\textbf{OnData(data)}} \\
+  \-\hspace{1em} \textbf{if} !retxedList.contains(data.seqNum) /$*$ do
+  not take re-transmitted packets as RTT samples $*$/\\
+  \-\hspace{2em} UpdateRTO(EstimateRTT(data.seqNum))\\
+  \-\hspace{1em} \textbf{else}\\
+  \-\hspace{2em} retxedList.remove(data.seqNum)\\
+  \-\hspace{1em} \textbf{if} sentQueue.first() == data.seqNum
+  /$*$ expected data packet $*$/\\
+  \-\hspace{2em} outOfOrderData.clear()\\
+  \-\hspace{2em} \textbf{if} cwnd $<$ ssthresh\\
+  \-\hspace{3em} cwnd = cwnd + AIstep /$*$ additive increase $*$/ \\
+  \-\hspace{2em} \textbf{else} \\
+  \-\hspace{3em} cwnd = cwnd + AIstep/cwnd /* congestion avoidance */
+  \\
+  \-\hspace{1em} \textbf{else} /$*$ data arrived out of order $*$/ \\
+  \-\hspace{2em} outOfOrderData.add(data.seqNum)\\
+  \-\hspace{2em} \textbf{if} outOfOrderData.size() $>$
+  maxOutOfDrderData /$*$ congestion signal $*$/\\
+  \-\hspace{3em} ssthresh =  MDcoef $*$ cwnd\\
+  \-\hspace{3em} cwnd = ssthresh /$*$ fast recovery $*$/ \\
+  \-\hspace{3em} retxQueue.add(sentQueue.first())\\
+  \-\hspace{3em} ScheduleNextInterest() /$*$ fast re-transmission $*$/\\
+  \-\hspace{2em} \textbf{else}\\
+  \-\hspace{3em} /$*$ don't increase cwnd here $*$/ \\\\
+  \-\hspace{1em} sentQueue.remove(data.seqNum) /$*$ remove the
+  acknowledged interest from the queue $*$/\\\\
+  \underline{\textbf{OnNack(nack)}} \\
+  \-\hspace{1em} \textbf{if} nack.seqNum $>$ lastReceivedNack.seqNum +
+  cwnd\\
+  \-\hspace{2em} ssthresh =  MDcoef $*$ cwnd\\
+  \-\hspace{2em} cwnd = ssthresh /$*$ fast recovery $*$/ \\
+  \-\hspace{2em} lastReceivedNack = nack /$*$ update $*$/ \\\\
+  \-\hspace{1em} retxQueue.add(nack.seqNum)\\
+  \-\hspace{1em} ScheduleNextInterest() /$*$ fast re-transmission $*$/\\\\
+  \underline{\textbf{OnTimeout(seqNum)}} \\
+  \-\hspace{1em} ssthresh =  MDcoef $*$ cwnd\\
+  \-\hspace{1em} cwnd = 1\\
+  \-\hspace{1em} RTO = rtoBackoffMultiplier * RTO\\\\
+  \-\hspace{1em} retxQueue.add(seqNum)\\
+  \-\hspace{1em} ScheduleNextInterest()
+\end{mdframed}
+
+\vspace{1em}
+\underline{\textbf{RTT Estimation and RTO Calculation}}\\
+
+\underline{\emph{Design Principles}}
+
+\begin{itemize}[noitemsep]
+\item Compliant with RFC 6298
+  (\url{https://tools.ietf.org/html/rfc6298}).
+\item Using Karn's algorithm, i.e., don't take RTT sample from
+  re-transmitted packets.
+\item Adjust parameters to common TCP defaults.
+\end{itemize}
+
+\underline{\emph{Variables and Parameters}}
+\begin{mdframed}
+  \textbf{RTO} : re-transmission timeout\\
+  \textbf{SRTT} : smoothed round-trip time\\
+  \textbf{RTTVAR} : round-trip time variation\\
+  \textbf{G} : clock granularity (unit: seconds)\\
+  \textbf{alpha} : RTT estimation filter gain\\
+  \textbf{beta} : variance filter gain\\
+  \textbf{MINRTO} : lower-bound of RTO\\
+  \textbf{MAXRTO} : upper-bound of RTO\\
+  \textbf{K} : coefficient for calculating RTO\\
+\end{mdframed}
+
+\underline{\emph{Initial Variable and Parameter Settings}}
+\begin{mdframed}
+  MINRTO = 1; //initially, the sender should set RTO to 1s, as suggested
+  in RFC 6298\\
+  RTO = MINRTO;\\
+  alpha = 1/8; // suggested in RFC 6298\\
+  beta = 1/4; // suggested in RFC 6298\\
+  MAXRTO = 60; // RFC 6289 suggests this value should be at least 60s\\
+  G = 0.1; // 0.1 second, RFC 6298 suggested that finer clock
+  granularities ($<=$ 100ms) perform better than coarser
+  granularities.
+\end{mdframed}
+
+\underline{\emph{RTT estimation and RTO calculation ($R$ is the
+    current RTT measurement)}}
+\begin{mdframed}
+  \textbf{RttEstimation(R)}\\
+  \-\hspace{2em} \textbf{if} it is the very first measurement:\\
+  \-\hspace{4em} SRTT = R;\\
+  \-\hspace{4em} RTTVAR = R/2;\\
+  \-\hspace{2em} \textbf{else:} // subsequent RTT measurement\\
+  \-\hspace{4em} RTTVAR = (1 - beta) * RTTVAR + beta * $|$SRTT - R$|$;\\
+  \-\hspace{4em} SRTT = (1 - alpha) * SRTT + alpha * R;
+\end{mdframed}
+
+\emph{Note} that RTT sample should not be taken from the
+re-transmitted packets according to Karn's algorithm.\\
+
+\vspace{1em}
+After computing SRTT and RTTVAR, sender should update RTO:\\
+
+\-\hspace{2em} RTO = SRTT + max (G, K * RTTVAR)\\
+
+\emph{Note} that if the computed RTO is less than 1 second, it should be
+rounded up to 1 second, as suggested in RFC 6298.  RFC 6298
+recommends a large minimum value on the RTO to keep TCP conservative
+and avoid spurious re-transmission.
+
+\vspace{2em}
+\underline{\textbf{Algorithm for managing the re-transmission
+    timer}}\\
+
+\emph{note: the algorithm is recommended in RFC 6298, terminologies
+  are adjusted for NDN. Also section (5.7) is specific to TCP's
+  three-way handshake, so is not included.}
+\begin{mdframed}
+  \begin{enumerate}
+  \item Every time an interest packet is sent (including a
+    re-transmission), if the timer is not running, start it running so
+    that it will expire after RTO seconds (for the current value of
+    RTO).
+  \item When the outstanding interest packets have been acknowledged
+    (by their corresponding data packets), turn off the
+    re-transmission timer.
+  \item When a data packet is received that acknowledges a new interest
+    packet, restart the re-transmission timer so that it will expire
+    after RTO seconds (for the current value of RTO).\\
+  \end{enumerate}
+
+  When the re-transmission timer expires, do the following:
+  \begin{enumerate}
+  \item Re-transmit the earliest interest packet that has not been
+    acknowledged yet.
+  \item The consumer must set RTO = RTO * 2 (``exponentially back off
+    the timer''). The value of MAXRTO may be used to provide an upper
+    bound to this doubling operation.
+  \item Start the re-transmission timer so that it will expire
+    after RTO seconds (for the value of RTO after the doubling
+    operation).
+  \end{enumerate}
+\end{mdframed}
+
+\vspace{2em}
+
+\end{document}
