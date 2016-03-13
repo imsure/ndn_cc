@@ -30,7 +30,7 @@ main(int argc, const char *argv[])
   params.k = 4;
   params.G = 0.1;
   params.cwnd_record_interval = 10; // ms
-  params.retxtimer_check_interval = 5000; // ms
+  params.retxtimer_check_interval = 10; // ms
 
   namespace po = boost::program_options;
   po::options_description desc("Options");
