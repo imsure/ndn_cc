@@ -10,7 +10,7 @@ git clone https://github.com/imsure/ndn_cc ndn_cc
 
 ### Setup virtual machine and install NDN packages
 
-1. Install [vagrant](https://www.vagrantup.com/) and bring up the
+- Install [vagrant](https://www.vagrantup.com/) and bring up the
 VM:
 
 ```
@@ -23,7 +23,7 @@ cp ndn_cc/scripts/ndn_install ./
 vagrant up
 ```
 
-2. SSH into the VM and install NDN related software
+- SSH into the VM and install NDN related software
 
 ```
 vagrant ssh
@@ -41,22 +41,22 @@ make install
 
 ### Run file transfer application without minindn
 
-1. start nfd
+- start nfd
 ```
 nfd-start
 ```
 
-2. run producer
+- run producer
 ```
 ft-producer /ndn/name/prefix /path/to/file
 ```
 
-3. run consumer with AIMD scheme
+- run consumer with AIMD scheme
 ```
 ft-consumer-reno /ndn/name/prefix /path/to/file
 ```
 
-4. run consumer with AIMD+Hole scheme
+- run consumer with AIMD+Hole scheme
 ```
 ft-consumer-reno -o /ndn/name/prefix /path/to/file
 ```
