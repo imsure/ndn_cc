@@ -59,7 +59,7 @@ Consumer::run()
   double throughput1 =
     (m_dataCount * 8 * data_packet_size) / time_elapsed.count();
   double throughput2 =
-    ((m_dataCount-m_duplicatesCount) * 8 * data_packet_size) / time_elapsed.count();
+    ((m_dataCount-m_duplicateCount) * 8 * data_packet_size) / time_elapsed.count();
 
   std::cout << "Throughput with duplicates: " << throughput1 << " kbps" << std::endl;
   std::cout << "Throughput without duplicates: " << throughput2 << " kbps" << std::endl;
