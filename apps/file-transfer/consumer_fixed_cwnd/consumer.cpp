@@ -17,6 +17,7 @@ Consumer::Consumer(const Name& prefix, const std::string file_name,
   , m_interestLifeTime(interest_lifetime)
   , m_timeoutCount(0)
   , m_dataCount(0)
+  , m_duplicateCount(0)
   , m_nextToPrint(0)
 {
   m_ofs.open(file_name, std::ios::out | std::ios::binary);
@@ -54,9 +55,14 @@ Consumer::run()
   std::cout << "It takes " << time_elapsed.count() << " milliseconds to run consumer." << std::endl;
 
   int data_packet_size = content_size + header_overhead;
-  double throughput = (m_dataCount * 8 * data_packet_size) / time_elapsed.count();
 
-  std::cout << "Throughput: " << throughput << " kbps" << std::endl;
+  double throughput1 =
+    (m_dataCount * 8 * data_packet_size) / time_elapsed.count();
+  double throughput2 =
+    ((m_dataCount-m_duplicatesCount) * 8 * data_packet_size) / time_elapsed.count();
+
+  std::cout << "Throughput with duplicates: " << throughput1 << " kbps" << std::endl;
+  std::cout << "Throughput without duplicates: " << throughput2 << " kbps" << std::endl;
 
   writeInOrderData();
 }
@@ -136,6 +142,7 @@ Consumer::afterReceivingData(uint64_t recv_segno)
   } else { // found
     // it means we've received duplicate data packets, probably due to retransmission
     std::cout << "A duplicate data packet received, segment # = " << recv_segno << std::endl;
+    m_duplicateCount++;
   }
 
   if (m_inFlight > 0) {

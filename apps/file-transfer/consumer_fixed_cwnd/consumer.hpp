@@ -187,6 +187,7 @@ private:
   /* For statistics */
   int m_timeoutCount; // number of timed out packets
   int m_dataCount; // number of data packets received
+  int m_duplicateCount;
 
   // A list of <send time, segment #>. Time series of all the
   // packet being sent out, including retransmitted packets.
