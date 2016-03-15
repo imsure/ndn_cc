@@ -19,3 +19,8 @@ node_modules/
 *.log
 *.out
 *.aux
+
+ft-consumer-reno
+ft-consumer-aimd
+ft-consumer-fixed
+ft-producer

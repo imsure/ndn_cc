@@ -4,7 +4,7 @@ from ndn.experiments.experiment import Experiment
 import time
 import sys
 
-class CCAimdExperiment(Experiment):
+class CCRenoExperiment(Experiment):
     def __init__(self, args):
         Experiment.__init__(self, args)
 
@@ -54,7 +54,7 @@ class CCAimdExperiment(Experiment):
         for host in self.net.hosts:
             if host.name.startswith('consumer'):
                 print "run %s" % host.name
-                host.cmd("ft-consumer-aimd /ndn/edu/producer%s/spmcat spmcat > %s.log &" % (host.name[-1], host.name))
+                host.cmd("ft-consumer-reno -v -o /ndn/edu/producer%s/spmcat spmcat > %s.log &" % (host.name[-1], host.name))
         time.sleep(2)
 
-Experiment.register("cc_aimd", CCAimdExperiment)
+Experiment.register("cc_reno", CCRenoExperiment)
