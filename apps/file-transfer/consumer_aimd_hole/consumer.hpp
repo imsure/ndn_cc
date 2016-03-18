@@ -60,7 +60,7 @@ private:
    * Send out an interest packet with segment # 'segno'.
    */
   void
-  sendInterest(uint64_t segno);
+  sendInterest(uint64_t segno, bool retx);
 
   /**
    * Return the next segment # to be sent out in order.
@@ -165,6 +165,8 @@ private:
 
   // maps a segment number to <time when it was sent, rto for the segment>
   std::map<uint64_t, std::pair<time::steady_clock::TimePoint, double>> m_timeSent;
+
+  std::map<uint64_t, uint32_t> m_nonceMap;
 
   /* For interests pipeline */
   uint64_t m_nextSegNum; // next segment number to be send in order, not include retxed ones

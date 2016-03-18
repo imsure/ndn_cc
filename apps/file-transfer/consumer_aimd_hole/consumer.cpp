@@ -44,14 +44,16 @@ Consumer::run()
   // Consumer starts by sending out the interest for the first segment.
   // e.g., /name/prefix/0
   m_inFlight++; // increment # of interests in the current window
-  m_timeSent[m_nextSegNum] = std::make_pair(time::steady_clock::now(), 100); // update timer
+  m_rto = 100;
+  m_timeSent[m_nextSegNum] = std::make_pair(time::steady_clock::now(), m_rto); // update timer
   m_sentList.push_back(m_nextSegNum); // add segment # at the end of the list
   //  beforeSendingInterest(m_nextSegNum, false);
   Interest interest(Name(m_prefix).appendSegment(m_nextSegNum));
-  interest.setInterestLifetime(time::milliseconds(10000));
+  interest.setInterestLifetime(time::milliseconds(1000));
   interest.setMustBeFresh(true);
   m_face.expressInterest(interest, bind(&Consumer::onDataFirstTime, this, _1, _2,
                                         time::steady_clock::now()));
+  m_nonceMap[m_nextSegNum] = interest.getNonce();
 
   // schedule the event to check retransmission timer.
   // for the first interest, since we don't know RTO yet, check it after 1 second.
@@ -106,11 +108,21 @@ Consumer::beforeSendingInterest(uint64_t segno, bool retx)
 }
 
 void
-Consumer::sendInterest(uint64_t segno)
+Consumer::sendInterest(uint64_t segno, bool retx)
 {
   Interest interest(Name(m_prefix).appendSegment(segno));
-  interest.setInterestLifetime(time::milliseconds(10000));
+
+  if (retx) {
+    interest.setNonce(m_nonceMap[segno]);
+  } else {
+    m_nonceMap[segno] = interest.getNonce();
+  }
+  interest.setInterestLifetime(time::milliseconds(1000));
+  //interest.setInterestLifetime(time::milliseconds((int)m_rto));
   interest.setMustBeFresh(true);
+
+  std::cout << "Sending interest " << segno << ", nonce: "
+            << interest.getNonce() << std::endl;
 
   m_face.expressInterest(interest, bind(&Consumer::onData, this, _1, _2,
                                         time::steady_clock::now()));
@@ -165,7 +177,10 @@ Consumer::rttEstimator(double rtt)
   m_rttVar = (1-m_params.beta) * m_rttVar + m_params.beta * std::abs(m_sRtt-rtt);
   m_sRtt = (1-m_params.alpha) * m_sRtt + m_params.alpha * rtt;
 
+  //m_rto = m_sRtt + std::max(100.0, m_params.k * m_rttVar);
   m_rto = m_sRtt + m_params.k * m_rttVar;
+  //if (m_rto < 500) m_rto = 500.0;
+  if (m_rto > 10000) m_rto = 10000.0;
 }
 
 bool
@@ -197,10 +212,10 @@ Consumer::checkRetxTimer()
     Rtt elapsed = time::steady_clock::now() - time_sent; // time elapsed
     if (elapsed.count() > rto) { // timer expired?
       uint64_t timedout_seg = it->first;
-      if (m_isVerbose) {
-        std::cout << "Segment " << timedout_seg << " timed out."
-                  << "time elapsed: " << elapsed << ", rto: " << rto << std::endl;
-      }
+      //if (m_isVerbose) {
+      std::cout << "Segment " << timedout_seg << " timed out."
+                << "time elapsed: " << elapsed << ", rto: " << rto << std::endl;
+        //}
       m_timeSent.erase(timedout_seg); // remove checked entry
       m_retxQueue.push(timedout_seg); // put on retx queue
       timeout_found = true;
@@ -221,21 +236,26 @@ Consumer::onData(const Interest& interest, const Data& data,
                  const time::steady_clock::TimePoint& timeSent)
 {
   uint64_t recv_segno = data.getName()[-1].toSegment();
-  if (m_isVerbose)
-    std::cout << "Segment received: " << recv_segno << std::endl;
 
   afterReceivingData(recv_segno);
+
+  Rtt measured_rtt = time::steady_clock::now() - timeSent;
+  std::cout << "Segment received: " << recv_segno
+            << ", RTT: " << measured_rtt.count() << "ms" << std::endl;
+  //std::cout << "RTO: " << m_rto << "ms" << std::endl;
 
   std::list<uint64_t>::iterator it;
   it = find(m_retxList.begin(), m_retxList.end(), recv_segno);
   if (it == m_retxList.end()) { // not found in retx list, sample RTT
     // Calculate SRTT and RTTVAR
-    Rtt measured_rtt = time::steady_clock::now() - timeSent;
     double time_elapsed = measured_rtt.count();
     rttEstimator(time_elapsed);
+    // std::cout << "Measured RTT: " << measured_rtt.count() << "ms" << std::endl;
   } else { // received segment number was retransmitted
-    if (m_isVerbose)
-      std::cout << "Retransmitted segment received: " << recv_segno << std::endl;
+    //if (m_isVerbose)
+    std::cout << "Retransmitted segment received: " << recv_segno << std::endl;
+
+    //m_retxList.remove(recv_segno);
   }
 
   if (m_holeDetection) {
@@ -272,7 +292,6 @@ Consumer::onData(const Interest& interest, const Data& data,
   m_validator.validate(data, bind(&Consumer::onDataValidated, this, _1),
                        bind(&Consumer::onFailure, this, _2));
 
-  std::cout << "# of data received: " << m_recvList.size() << std::endl;
   if ((m_recvList.size() - 1) >= m_lastSegNum) { // all interests have been acked
     if (m_isVerbose)
       std::cout << "Stopping the consumer..." << std::endl;
@@ -294,8 +313,8 @@ Consumer::afterReceivingData(uint64_t recv_segno)
   } else { // found
     // it means we've received duplicate data packets, probably due to retransmission
     m_duplicatesCount++;
-    if (m_isVerbose)
-      std::cout << "A duplicate data packet received, segment # = " << recv_segno << std::endl;
+    //if (m_isVerbose)
+    std::cout << "A duplicate data packet received, segment # = " << recv_segno << std::endl;
   }
 
   if (m_inFlight > 0) {
@@ -325,7 +344,7 @@ Consumer::schedulePackets()
       }
 
       beforeSendingInterest(retx_segno, true);
-      sendInterest(retx_segno);
+      sendInterest(retx_segno, true);
 
       if (m_isVerbose)
         std::cout << "Retransmitting segment: " << retx_segno << std::endl;
@@ -335,7 +354,7 @@ Consumer::schedulePackets()
         break;
       }
       beforeSendingInterest(m_nextSegNum, false);
-      sendInterest(m_nextSegNum);
+      sendInterest(m_nextSegNum, false);
 
       if (m_isVerbose)
         std::cout << "Sending out next segment: "<< m_nextSegNum << std::endl;

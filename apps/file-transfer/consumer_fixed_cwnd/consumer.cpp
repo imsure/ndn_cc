@@ -94,10 +94,10 @@ Consumer::onDataFirstTime(const Interest& interest, const Data& data,
 {
   uint64_t recv_segno = data.getName()[-1].toSegment();
   m_lastSegNum = data.getFinalBlockId().toSegment();
-  if (m_isVerbose) {
-    std::cout << "Segment received: " << recv_segno << std::endl;
-    std::cout << "Expected last segment #: " << m_lastSegNum << std::endl;
-  }
+  // if (m_isVerbose) {
+  //   std::cout << "Segment received: " << recv_segno << std::endl;
+  //   std::cout << "Expected last segment #: " << m_lastSegNum << std::endl;
+  // }
 
   afterReceivingData(recv_segno);
 
@@ -113,8 +113,10 @@ Consumer::onData(const Interest& interest, const Data& data,
                  const time::steady_clock::TimePoint& timeSent)
 {
   uint64_t recv_segno = data.getName()[-1].toSegment();
+  Rtt rtt = time::steady_clock::now() - timeSent;
   if (m_isVerbose)
-    std::cout << "Segment received: " << recv_segno << std::endl;
+    std::cout << "Segment received: " << recv_segno << ", rtt: "
+              << rtt.count() << " ms"<< std::endl;
 
   afterReceivingData(recv_segno);
 
@@ -160,8 +162,6 @@ Consumer::schedulePackets()
       break;
     }
     beforeSendingIntrest(m_nextSegNum, false);
-    if (m_isVerbose)
-      std::cout << "Sending out next segment: "<< m_nextSegNum << std::endl;
     sendInterest(m_nextSegNum);
     m_nextSegNum += 1; // only increase for in order segement, not for retxed ones
     avail_window_sz--;
