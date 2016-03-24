@@ -25,7 +25,7 @@ main(int argc, const char *argv[])
   params.max_num_ood = 5;
   params.rto_backoff_multiplier = 2;
   params.min_rto = 1000; // 1000 milliseconds(1 second)
-  params.max_rto = 10000; // ms
+  params.max_rto = 2000; // ms
   params.alpha = 0.125;
   params.beta = 0.25;
   params.k = 4;

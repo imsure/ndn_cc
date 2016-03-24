@@ -53,7 +53,7 @@ Consumer::run()
   interest.setMustBeFresh(true);
   m_face.expressInterest(interest, bind(&Consumer::onDataFirstTime, this, _1, _2,
                                         time::steady_clock::now()));
-  m_nonceMap[m_nextSegNum] = interest.getNonce();
+  //  m_nonceMap[m_nextSegNum] = interest.getNonce();
 
   // schedule the event to check retransmission timer.
   // for the first interest, since we don't know RTO yet, check it after 1 second.
@@ -112,12 +112,12 @@ Consumer::sendInterest(uint64_t segno, bool retx)
 {
   Interest interest(Name(m_prefix).appendSegment(segno));
 
-  if (retx) {
-    interest.setNonce(m_nonceMap[segno]);
-  } else {
-    m_nonceMap[segno] = interest.getNonce();
-  }
-  interest.setInterestLifetime(time::milliseconds(1000));
+  // if (retx) {
+  //   interest.setNonce(m_nonceMap[segno]);
+  // } else {
+  //   m_nonceMap[segno] = interest.getNonce();
+  // }
+  interest.setInterestLifetime(time::milliseconds(2000));
   //interest.setInterestLifetime(time::milliseconds((int)m_rto));
   interest.setMustBeFresh(true);
 
@@ -177,10 +177,10 @@ Consumer::rttEstimator(double rtt)
   m_rttVar = (1-m_params.beta) * m_rttVar + m_params.beta * std::abs(m_sRtt-rtt);
   m_sRtt = (1-m_params.alpha) * m_sRtt + m_params.alpha * rtt;
 
-  //m_rto = m_sRtt + std::max(100.0, m_params.k * m_rttVar);
+  //m_rto = m_sRtt + std::max(20.0, m_params.k * m_rttVar);
   m_rto = m_sRtt + m_params.k * m_rttVar;
   //if (m_rto < 500) m_rto = 500.0;
-  if (m_rto > 10000) m_rto = 10000.0;
+  if (m_rto > 2000) m_rto = 2000.0;
 }
 
 bool
@@ -237,7 +237,32 @@ Consumer::onData(const Interest& interest, const Data& data,
 {
   uint64_t recv_segno = data.getName()[-1].toSegment();
 
-  afterReceivingData(recv_segno);
+  std::vector<uint64_t>::iterator _it;
+  _it = find(m_recvList.begin(), m_recvList.end(), recv_segno);
+  // auto _it = m_timeSent.find(recv_segno);
+  if (_it == m_recvList.end()) { // not found
+  //if (_it != m_timeSent.end()) { // found
+    m_dataCount++;
+    m_recvList.push_back(recv_segno);
+    m_timeSent.erase(recv_segno);
+  } else { // found
+    // it means we've received duplicate data packets, probably due to retransmission
+    m_duplicatesCount++;
+    //if (m_isVerbose)
+    std::cout << "A duplicate data packet received, segment # = " << recv_segno << std::endl;
+    if (m_inFlight > 0) {
+      m_inFlight--;
+    }
+    m_timeSent.erase(recv_segno);
+    schedulePackets();
+    return;
+  }
+
+  if (m_inFlight > 0) {
+    m_inFlight--;
+  }
+
+  //  afterReceivingData(recv_segno);
 
   Rtt measured_rtt = time::steady_clock::now() - timeSent;
   std::cout << "Segment received: " << recv_segno
