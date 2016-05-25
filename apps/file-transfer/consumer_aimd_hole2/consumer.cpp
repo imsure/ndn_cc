@@ -6,6 +6,9 @@
 namespace ndn {
 namespace file_transfer {
 
+int rttest_count = 0;
+double rtt_sum = 0;
+
 Consumer::Consumer(const Name& prefix, const std::string file_name,
                    struct Parameters& params, bool is_verbose, bool hole_detection)
   : m_prefix(prefix)
@@ -30,13 +33,12 @@ Consumer::Consumer(const Name& prefix, const std::string file_name,
   m_cwnd = m_params.init_cwnd;
   m_cwndTimeSeries.push_back(std::make_pair(time::steady_clock::now(), m_cwnd));
   m_ssthresh = m_params.init_ssthresh;
+  m_lastTimeout = time::steady_clock::now();
 }
 
 void
 Consumer::run()
 {
-  m_startTime = time::steady_clock::now();
-
   std::cout << m_holeDetection << std::endl;
   if (m_holeDetection) {
     std::cout << "Running consumer with sequence hole detection..." << std::endl;
@@ -92,6 +94,8 @@ Consumer::run()
 
   std::cout << "Throughput with duplicates: " << throughput1 << " kbps" << std::endl;
   std::cout << "Throughput without duplicates: " << throughput2 << " kbps" << std::endl;
+  std::cout << "rtt estimation count: "<< rttest_count << std::endl;
+  std::cout << "rtt avg: "<< rtt_sum/rttest_count << std::endl;
 
   writeInOrderData();
   writeStats();
@@ -107,6 +111,7 @@ Consumer::beforeSendingInterest(uint64_t segno, bool retx)
   }
   m_inFlight++; // increment # of interests in the current window
   m_timeSent[segno] = std::make_pair(time::steady_clock::now(), m_rto); // update timer
+  //m_timeSent[segno] = std::make_pair(time::steady_clock::now(), 1.2 * m_rto); // update timer
 }
 
 void
@@ -150,10 +155,6 @@ Consumer::onDataFirstTime(const Interest& interest, const Data& data,
   m_rttVar = m_sRtt / 2;
   m_rto = m_sRtt + m_params.k * m_rttVar;
 
-  Rtt time_since = time::steady_clock::now() - m_startTime;
-  m_rttrto.push_back(std::make_pair(time_since.count(),
-                                    std::make_pair(measured_rtt.count(), m_rto)));
-
   uint64_t recv_segno = data.getName()[-1].toSegment();
   m_lastSegNum = data.getFinalBlockId().toSegment();
 
@@ -180,6 +181,9 @@ Consumer::onDataFirstTime(const Interest& interest, const Data& data,
 void
 Consumer::rttEstimator(double rtt)
 {
+  rttest_count++;
+  rtt_sum += rtt;
+  //std::cout << "Estimating RTT, measured rtt: " << rtt << std::endl;
   m_rttVar = (1-m_params.beta) * m_rttVar + m_params.beta * std::abs(m_sRtt-rtt);
   m_sRtt = (1-m_params.alpha) * m_sRtt + m_params.alpha * rtt;
 
@@ -187,10 +191,6 @@ Consumer::rttEstimator(double rtt)
   m_rto = m_sRtt + m_params.k * m_rttVar;
   //if (m_rto < 500) m_rto = 500.0;
   if (m_rto > 2000) m_rto = 2000.0;
-
-  Rtt time_since = time::steady_clock::now() - m_startTime;
-  m_rttrto.push_back(std::make_pair(time_since.count(),
-                                    std::make_pair(rtt, m_rto)));
 }
 
 bool
@@ -255,6 +255,15 @@ Consumer::onData(const Interest& interest, const Data& data,
     m_dataCount++;
     m_recvList.push_back(recv_segno);
     m_timeSent.erase(recv_segno);
+
+    // Rtt measured_rtt = time::steady_clock::now() - timeSent;
+    // std::cout << "Segment received: " << recv_segno
+    //           << ", RTT: " << measured_rtt.count() << "ms" << std::endl;
+    // //std::cout << "RTO: " << m_rto << "ms" << std::endl;
+
+    // double time_elapsed = measured_rtt.count();
+    // rttEstimator(time_elapsed);
+    // std::cout << "Measured RTT: " << measured_rtt.count() << "ms" << std::endl;
   } else { // found
     // it means we've received duplicate data packets, probably due to retransmission
     m_duplicatesCount++;
@@ -420,9 +429,15 @@ Consumer::onFailure(const std::string& reason)
 void
 Consumer::onTimeout(int timeout_count)
 {
+  time::steady_clock::TimePoint now = time::steady_clock::now();
+  Rtt interval = now - m_lastTimeout;
+
+  // if (interval.count() > 50) {
   m_ssthresh = std::max(2.0, m_cwnd * m_params.md_coef); // multiplicative decrease
   m_cwnd = m_params.init_cwnd;
   m_rto = std::min(m_params.max_rto, m_rto * m_params.rto_backoff_multiplier); // backoff RTO
+  // }
+  m_lastTimeout = time::steady_clock::now(); // update
 
   m_timeoutCount += timeout_count;
   m_inFlight = std::max(0, m_inFlight - timeout_count);
@@ -433,9 +448,6 @@ Consumer::onTimeout(int timeout_count)
               << m_inFlight << ", RTO: " << m_rto
               << ", ssthresh: " << m_ssthresh << std::endl;
   }
-
-  Rtt time_since = time::steady_clock::now() - m_startTime;
-  m_timeoutRec.push_back(std::make_pair(time_since.count(), timeout_count));
 
   schedulePackets();
 }
@@ -493,35 +505,6 @@ Consumer::writeStats()
     fs_cwnd << '\t';
     fs_cwnd << m_cwndTimeSeries[i].second;
     fs_cwnd << '\n';
-  }
-
-  std::ofstream fs_rttrto("rttrto.txt");
-
-  // header
-  fs_rttrto << "time\t";
-  fs_rttrto << "rtt\t";
-  fs_rttrto << "rto\n";
-
-  for (int i = 0; i < m_rttrto.size(); ++i) {
-    fs_rttrto << m_rttrto[i].first;
-    fs_rttrto << '\t';
-    fs_rttrto << m_rttrto[i].second.first;
-    fs_rttrto << '\t';
-    fs_rttrto << m_rttrto[i].second.second;
-    fs_rttrto << '\n';
-  }
-
-  std::ofstream fs_timeout("timeout.txt");
-
-  // header
-  fs_timeout << "time\t";
-  fs_timeout << "number\n";
-
-  for (int i = 0; i < m_timeoutRec.size(); ++i) {
-    fs_timeout << m_timeoutRec[i].first;
-    fs_timeout << '\t';
-    fs_timeout << m_timeoutRec[i].second;
-    fs_timeout << '\n';
   }
 }
 

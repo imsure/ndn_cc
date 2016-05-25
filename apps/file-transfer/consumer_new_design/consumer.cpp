@@ -6,6 +6,9 @@
 namespace ndn {
 namespace file_transfer {
 
+int rtt_count = 0;
+double rtt_sum = 0;
+
 Consumer::Consumer(const Name& prefix, const std::string file_name,
                    struct Parameters& params, bool is_verbose, bool hole_detection)
   : m_prefix(prefix)
@@ -86,6 +89,9 @@ Consumer::run()
   std::cout << "Throughput with duplicates: " << throughput1 << " kbps" << std::endl;
   std::cout << "Throughput without duplicates: " << throughput2 << " kbps" << std::endl;
 
+  std::cout << "rtt estimation count: "<< rtt_count << std::endl;
+  std::cout << "rtt avg: "<< rtt_sum/rtt_count << std::endl;
+
   writeInOrderData();
   writeStats();
 }
@@ -161,6 +167,8 @@ Consumer::onDataFirstTime(const Interest& interest, const Data& data,
 void
 Consumer::rttEstimator(double rtt)
 {
+  rtt_count++;
+  rtt_sum += rtt;
   m_rttVar = (1-m_params.beta) * m_rttVar + m_params.beta * std::abs(m_sRtt-rtt);
   m_sRtt = (1-m_params.alpha) * m_sRtt + m_params.alpha * rtt;
 
@@ -343,7 +351,7 @@ Consumer::onTimeout(const Interest& interest)
     m_cwnd = m_params.init_cwnd;
     m_rto = std::min(m_params.max_rto, m_rto * m_params.rto_backoff_multiplier); // backoff RTO
   }
-  m_lastTimeout = time::steady_clock::now();
+  m_lastTimeout = time::steady_clock::now(); // update
 
   m_timeoutCount++;
   if (m_inFlight > 0)

@@ -19,7 +19,7 @@ Consumer::Consumer(const Name& prefix, const std::string file_name,
   , m_holeCount(0)
   , m_dataCount(0)
   , m_duplicatesCount(0)
-  , m_retxEvent(m_scheduler)
+    //  , m_retxEvent(m_scheduler)
   , m_recordCwndEvent(m_scheduler)
 {
   m_ofs.open(file_name, std::ios::out | std::ios::binary);
@@ -30,13 +30,13 @@ Consumer::Consumer(const Name& prefix, const std::string file_name,
   m_cwnd = m_params.init_cwnd;
   m_cwndTimeSeries.push_back(std::make_pair(time::steady_clock::now(), m_cwnd));
   m_ssthresh = m_params.init_ssthresh;
+
+  m_lastTimeout = time::steady_clock::now();
 }
 
 void
 Consumer::run()
 {
-  m_startTime = time::steady_clock::now();
-
   std::cout << m_holeDetection << std::endl;
   if (m_holeDetection) {
     std::cout << "Running consumer with sequence hole detection..." << std::endl;
@@ -55,12 +55,16 @@ Consumer::run()
   interest.setMustBeFresh(true);
   m_face.expressInterest(interest, bind(&Consumer::onDataFirstTime, this, _1, _2,
                                         time::steady_clock::now()));
-  //  m_nonceMap[m_nextSegNum] = interest.getNonce();
+  m_retxEvents[m_nextSegNum] = new scheduler::ScopedEventId(m_scheduler);
+  *(m_retxEvents[m_nextSegNum]) = m_scheduler.scheduleEvent(time::milliseconds((int)m_rto+1),
+                                                            bind(&Consumer::checkRetxTimer,
+                                                                 this, m_nextSegNum));
+ //  m_nonceMap[m_nextSegNum] = interest.getNonce();
 
   // schedule the event to check retransmission timer.
   // for the first interest, since we don't know RTO yet, check it after 1 second.
-  m_retxEvent = m_scheduler.scheduleEvent(time::milliseconds(m_params.retxtimer_check_interval),
-                                          bind(&Consumer::checkRetxTimer, this));
+  //  m_retxEvent = m_scheduler.scheduleEvent(time::milliseconds(m_params.retxtimer_check_interval),
+  //                                          bind(&Consumer::checkRetxTimer, this));
 
   // schedule the event to record size of congestion window
   m_recordCwndEvent =
@@ -112,6 +116,9 @@ Consumer::beforeSendingInterest(uint64_t segno, bool retx)
 void
 Consumer::sendInterest(uint64_t segno, bool retx)
 {
+  //m_retxEvent = m_scheduler.scheduleEvent(time::milliseconds(0),
+  //                        bind(&Consumer::checkRetxTimer, this));
+
   Interest interest(Name(m_prefix).appendSegment(segno));
 
   // if (retx) {
@@ -128,6 +135,11 @@ Consumer::sendInterest(uint64_t segno, bool retx)
 
   m_face.expressInterest(interest, bind(&Consumer::onData, this, _1, _2,
                                         time::steady_clock::now()));
+
+  m_retxEvents[segno] = new scheduler::ScopedEventId(m_scheduler);
+  *(m_retxEvents[segno]) = m_scheduler.scheduleEvent(time::milliseconds((int)m_rto+1),
+                                                     bind(&Consumer::checkRetxTimer,
+                                                          this, segno));
 }
 
 uint64_t
@@ -144,17 +156,15 @@ void
 Consumer::onDataFirstTime(const Interest& interest, const Data& data,
                           const time::steady_clock::TimePoint& timeSent)
 {
+  //m_retxEvent.cancel();
   // initialize SRTT and RTTVAR
   Rtt measured_rtt = time::steady_clock::now() - timeSent;
   m_sRtt = measured_rtt.count(); // in milliseconds
   m_rttVar = m_sRtt / 2;
   m_rto = m_sRtt + m_params.k * m_rttVar;
 
-  Rtt time_since = time::steady_clock::now() - m_startTime;
-  m_rttrto.push_back(std::make_pair(time_since.count(),
-                                    std::make_pair(measured_rtt.count(), m_rto)));
-
   uint64_t recv_segno = data.getName()[-1].toSegment();
+  m_retxEvents[recv_segno]->cancel();
   m_lastSegNum = data.getFinalBlockId().toSegment();
 
   if (m_isVerbose) {
@@ -172,7 +182,6 @@ Consumer::onDataFirstTime(const Interest& interest, const Data& data,
   m_validator.validate(data,
                        bind(&Consumer::onDataValidated, this, _1),
                        bind(&Consumer::onFailure, this, _2));
-
   m_sentList.remove(recv_segno);
   schedulePackets();
 }
@@ -187,10 +196,6 @@ Consumer::rttEstimator(double rtt)
   m_rto = m_sRtt + m_params.k * m_rttVar;
   //if (m_rto < 500) m_rto = 500.0;
   if (m_rto > 2000) m_rto = 2000.0;
-
-  Rtt time_since = time::steady_clock::now() - m_startTime;
-  m_rttrto.push_back(std::make_pair(time_since.count(),
-                                    std::make_pair(rtt, m_rto)));
 }
 
 bool
@@ -205,7 +210,7 @@ Consumer::dataReceived(uint64_t segno)
 }
 
 void
-Consumer::checkRetxTimer()
+Consumer::checkRetxTimer(uint64_t timedout_segno)
 {
   if (m_isVerbose) {
     std::cout << "Checking retx timer..." << std::endl;
@@ -214,31 +219,30 @@ Consumer::checkRetxTimer()
               << ", ssthresh: " << m_ssthresh << std::endl;
   }
 
-  int timeout_count = 0;
-  bool timeout_found = false;
-  for (auto it = m_timeSent.begin(); it != m_timeSent.end(); ++it) {
-    time::steady_clock::TimePoint time_sent = it->second.first;
-    double rto = it->second.second;
-    Rtt elapsed = time::steady_clock::now() - time_sent; // time elapsed
-    if (elapsed.count() > rto) { // timer expired?
-      uint64_t timedout_seg = it->first;
-      //if (m_isVerbose) {
-      std::cout << "Segment " << timedout_seg << " timed out."
-                << "time elapsed: " << elapsed << ", rto: " << rto << std::endl;
-        //}
-      m_timeSent.erase(timedout_seg); // remove checked entry
-      m_retxQueue.push(timedout_seg); // put on retx queue
-      timeout_found = true;
-      timeout_count++;
-    }
+  std::cout << "Segment " << timedout_segno << " timed out!\n";
+  m_retxQueue.push(timedout_segno); // put on retx queue
+
+  time::steady_clock::TimePoint now = time::steady_clock::now();
+  Rtt interval = now - m_lastTimeout;
+
+  //if (interval.count() > 50) {
+    m_ssthresh = std::max(2.0, m_cwnd * m_params.md_coef); // multiplicative decrease
+    m_cwnd = m_params.init_cwnd;
+    m_rto = std::min(m_params.max_rto, m_rto * m_params.rto_backoff_multiplier); // backoff RTO
+    //}
+  m_lastTimeout = time::steady_clock::now();
+
+  m_timeoutCount++;
+  if (m_inFlight > 0) m_inFlight--;
+
+  if (m_isVerbose) {
+    std::cout << "On time out..." << std::endl;
+    std::cout << "current window size: " << m_cwnd << ", in flight size: "
+              << m_inFlight << ", RTO: " << m_rto
+              << ", ssthresh: " << m_ssthresh << std::endl;
   }
 
-  if (timeout_found) {
-    onTimeout(timeout_count);
-  }
-
-  m_scheduler.scheduleEvent(time::milliseconds(m_params.retxtimer_check_interval),
-                            bind(&Consumer::checkRetxTimer, this));
+  schedulePackets();
 }
 
 void
@@ -246,6 +250,8 @@ Consumer::onData(const Interest& interest, const Data& data,
                  const time::steady_clock::TimePoint& timeSent)
 {
   uint64_t recv_segno = data.getName()[-1].toSegment();
+
+  m_retxEvents[recv_segno]->cancel();
 
   std::vector<uint64_t>::iterator _it;
   _it = find(m_recvList.begin(), m_recvList.end(), recv_segno);
@@ -434,9 +440,6 @@ Consumer::onTimeout(int timeout_count)
               << ", ssthresh: " << m_ssthresh << std::endl;
   }
 
-  Rtt time_since = time::steady_clock::now() - m_startTime;
-  m_timeoutRec.push_back(std::make_pair(time_since.count(), timeout_count));
-
   schedulePackets();
 }
 
@@ -456,7 +459,7 @@ void
 Consumer::stop()
 {
   // cancel the running events
-  m_retxEvent.cancel();
+  // m_retxEvent.cancel();
   m_recordCwndEvent.cancel();
 
   m_ioService.stop(); // stop I/O service
@@ -493,35 +496,6 @@ Consumer::writeStats()
     fs_cwnd << '\t';
     fs_cwnd << m_cwndTimeSeries[i].second;
     fs_cwnd << '\n';
-  }
-
-  std::ofstream fs_rttrto("rttrto.txt");
-
-  // header
-  fs_rttrto << "time\t";
-  fs_rttrto << "rtt\t";
-  fs_rttrto << "rto\n";
-
-  for (int i = 0; i < m_rttrto.size(); ++i) {
-    fs_rttrto << m_rttrto[i].first;
-    fs_rttrto << '\t';
-    fs_rttrto << m_rttrto[i].second.first;
-    fs_rttrto << '\t';
-    fs_rttrto << m_rttrto[i].second.second;
-    fs_rttrto << '\n';
-  }
-
-  std::ofstream fs_timeout("timeout.txt");
-
-  // header
-  fs_timeout << "time\t";
-  fs_timeout << "number\n";
-
-  for (int i = 0; i < m_timeoutRec.size(); ++i) {
-    fs_timeout << m_timeoutRec[i].first;
-    fs_timeout << '\t';
-    fs_timeout << m_timeoutRec[i].second;
-    fs_timeout << '\n';
   }
 }
 

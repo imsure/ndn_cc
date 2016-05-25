@@ -163,6 +163,8 @@ private:
   double m_rttVar; // round-trip time variation, in milliseconds
   double m_rto; // retransmission timeout, in milliseconds
 
+  time::steady_clock::TimePoint m_lastTimeout;
+
   // maps a segment number to <time when it was sent, rto for the segment>
   std::map<uint64_t, std::pair<time::steady_clock::TimePoint, double>> m_timeSent;
 
@@ -215,10 +217,6 @@ private:
 
   // Time series for congestion window
   std::vector<std::pair<time::steady_clock::TimePoint, double>> m_cwndTimeSeries;
-
-  time::steady_clock::TimePoint m_startTime;
-  std::vector<std::pair<double, std::pair<double, double>>> m_rttrto;
-  std::vector<std::pair<double, int>> m_timeoutRec;
 };
 
 } // namespace examples

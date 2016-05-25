@@ -1,0 +1,16 @@
+Bottleneck link queue size: 7, so optimal cwnd size is 7.
+
+During slow start phase:
+
+1. each received data opens cwnd by 1, and consumer sends out 2
+   Interests in response.
+
+2. by the time when cwnd = 7, consumer continues to grow its value and
+   remain in the slow start phase
+
+It seems that the connection can never reach equilibrium state. Is it
+because of RTT/RTO calculation?
+
+Proposed solution:
+
+

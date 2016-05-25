@@ -206,6 +206,7 @@ private:
   struct Parameters m_params;
   bool m_isVerbose;
   bool m_holeDetection;
+  bool m_inSlowStartPhase;
 
   /* For statistics */
   int m_timeoutCount; // number of timed out packets
@@ -219,6 +220,8 @@ private:
   time::steady_clock::TimePoint m_startTime;
   std::vector<std::pair<double, std::pair<double, double>>> m_rttrto;
   std::vector<std::pair<double, int>> m_timeoutRec;
+
+  time::steady_clock::TimePoint start_time;
 };
 
 } // namespace examples

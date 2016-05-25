@@ -43,6 +43,7 @@ Consumer::run()
                          bind(&Consumer::onDataFirstTime, this, _1, _2,
                               time::steady_clock::now()),
                          bind(&Consumer::onTimeout, this, _1, time::steady_clock::now()));
+  std::cout << "first interest: " << interest << std::endl;
 
   // m_ioService.run() will block until all events finished or m_ioService.stop() is called
   time::steady_clock::TimePoint start = time::steady_clock::now();

@@ -126,7 +126,7 @@ private:
    * This function also update RTO.
    */
   void
-  rttEstimator(double rtt);
+  rttEstimator(double rtt, uint64_t segno);
 
   /**
    * Write statistics data to files.
@@ -165,6 +165,7 @@ private:
 
   // maps a segment number to <time when it was sent, rto for the segment>
   std::map<uint64_t, std::pair<time::steady_clock::TimePoint, double>> m_timeSent;
+  std::map<uint64_t, std::pair<time::steady_clock::TimePoint, double>> m_removedRto;
 
   std::map<uint64_t, uint32_t> m_nonceMap;
 
@@ -212,13 +213,28 @@ private:
   int m_dataCount; // number of data packets received
   int m_holeCount;
   int m_duplicatesCount; // number of duplicated data packets received
+  int m_retxCount; // number of data packets received
+
 
   // Time series for congestion window
   std::vector<std::pair<time::steady_clock::TimePoint, double>> m_cwndTimeSeries;
 
   time::steady_clock::TimePoint m_startTime;
-  std::vector<std::pair<double, std::pair<double, double>>> m_rttrto;
+  std::vector<std::pair<uint64_t, std::pair<double, double>>> m_rttrto;
+  std::vector<std::pair<uint64_t, std::vector<double>>> m_rttrtoest;
   std::vector<std::pair<double, int>> m_timeoutRec;
+
+  time::steady_clock::TimePoint start_time;
+
+  time::steady_clock::TimePoint m_mostRecentTimeout;
+  time::steady_clock::TimePoint m_mostRecentRttEst;
+  double m_rttWhenTimeout;
+
+  uint64_t m_highData;
+  uint64_t m_highInterest;
+  uint64_t m_recPoint;
+
+  bool m_isInSlowStart;
 };
 
 } // namespace examples

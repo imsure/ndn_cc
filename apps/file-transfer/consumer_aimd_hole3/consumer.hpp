@@ -104,7 +104,7 @@ private:
   dataReceived(uint64_t segno);
 
   void
-  checkRetxTimer();
+  checkRetxTimer(uint64_t timedout_segno);
 
   /**
    * Only get called when the first data packet comes back so we can
@@ -150,7 +150,7 @@ private:
   Face m_face;
   ValidatorNull m_validator;
   Scheduler m_scheduler;
-  scheduler::ScopedEventId m_retxEvent;
+  //scheduler::ScopedEventId m_retxEvent;
   scheduler::ScopedEventId m_recordCwndEvent;
 
   /* For congestion control */
@@ -166,7 +166,9 @@ private:
   // maps a segment number to <time when it was sent, rto for the segment>
   std::map<uint64_t, std::pair<time::steady_clock::TimePoint, double>> m_timeSent;
 
-  std::map<uint64_t, uint32_t> m_nonceMap;
+  time::steady_clock::TimePoint m_lastTimeout;
+
+  std::map<uint64_t, scheduler::ScopedEventId *> m_retxEvents;
 
   /* For interests pipeline */
   uint64_t m_nextSegNum; // next segment number to be send in order, not include retxed ones
@@ -215,10 +217,6 @@ private:
 
   // Time series for congestion window
   std::vector<std::pair<time::steady_clock::TimePoint, double>> m_cwndTimeSeries;
-
-  time::steady_clock::TimePoint m_startTime;
-  std::vector<std::pair<double, std::pair<double, double>>> m_rttrto;
-  std::vector<std::pair<double, int>> m_timeoutRec;
 };
 
 } // namespace examples
